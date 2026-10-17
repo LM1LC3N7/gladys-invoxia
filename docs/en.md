@@ -1,61 +1,130 @@
-# Demo Devices Template
+# Invoxia
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Your [Invoxia](https://www.invoxia.com/) GPS trackers (bike, car, pets,
+luggage...) in Gladys, through the cloud of Invoxia, with the account of the
+Invoxia app.
 
-## What you get
+- each tracker becomes a Gladys device: **latitude**, **longitude**,
+  **accuracy** (m), **battery** (%), **moving** (when the tracker gives it),
+  **last seen** and **silent**;
+- a scene trigger **Tracker silent**: no news from the tracker for 1 hour to
+  48 hours (chosen in the scene): flat battery, tracker removed, no network.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+Read only, by polling: Gladys reads the cloud of Invoxia at a regular
+interval and never changes anything at Invoxia (mode, alerts and zones stay
+in the app).
+
+> **This integration has never been tested with a real Invoxia tracker nor a
+> real account.** This first version was written from the
+> [gps-tracker](https://gitlab.com/ezlo.picori/gps_tracker) library (MIT),
+> ported to JavaScript, and tested against a fake Invoxia API only. Tell the
+> Gladys forum what works and what does not.
+
+Unofficial integration, not affiliated with Invoxia.
+
+## An access to use gently
+
+Invoxia offers no API to its consumer customers (it is kept for its
+professional offer). Like gps-tracker, this integration uses the API of the
+Invoxia app with your credentials. Its terms of use do not forbid it
+outright, but do not encourage it either: Invoxia could act on an account
+that abuses it. The integration therefore keeps the requests to the bare
+minimum: 5 minutes at least between two readings, and the location of a
+tracker is read again only when its status changed.
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+- **E-mail address** and **Password**: those of your Invoxia account (the
+  Invoxia app). The password is kept by Gladys in its database, never shown
+  again, never written to a log, and sent only to the Invoxia API
+  (`https://labs.invoxia.io`, over https, certificate checked). The e-mail
+  address is never written to a log either.
+- **Refresh**: every 5 minutes to every hour (5 minutes by default). One
+  request per reading, plus one per tracker whose position changed. The
+  trackers themselves report only every few minutes to every few hours
+  (depending on their mode, to save their battery): reading more often
+  would bring nothing.
+- **Silent after**: 1 hour to 48 hours (24 hours by default): the delay
+  without news after which the **Silent** feature turns on.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+Then open the **Discovery** tab and create the trackers to follow. Only the
+created trackers receive their values.
 
-## Actions
+## What each feature shows
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+- **Latitude / Longitude**: the last known position, in degrees, rounded to
+  6 decimals. Both always go together. The newer of the last location of
+  the tracker and of the position given by its status. No history by
+  default (privacy; you can turn it on in the device).
+- **Accuracy** (m): the accuracy of the last location, as Invoxia gives it.
+  No history by default.
+- **Battery** (%): the battery of the tracker.
+- **Moving** (1 / 0): read from the `stationary` field of the status of the
+  tracker (0: moving, above 0: still, -1: unknown). **Reading to be
+  confirmed** on a real tracker. The feature appears in Discovery only once
+  the value was seen for this tracker (then update the created device to
+  add it).
+- **Last seen**: the last news from the tracker (its last event or its last
+  position), as `2026-10-18 08:00 UTC` (UTC: the integration does not know
+  the time zone of Gladys).
+- **Silent** (1 / 0): no news for the delay of the configuration.
+- A value Invoxia does not give is not published. Gladys accepts 300 states
+  per minute from an integration: this one sends 250 at most.
 
-## Scenes
+## Scene trigger: Tracker silent
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+Choose the tracker (or any) and the delay (**required**: 1 hour to 48
+hours). The scene starts when the tracker gave no news for this delay, at
+the next reading. Only the trackers created in Gladys fire. **Once per
+silence**: again only after news less than an hour old. Never for a delay
+already reached when the integration starts (no event at the first
+reading), nor for a tracker seen for the first time, nor at a reading where
+the clock of Gladys jumped. 30 events at most per reading. Variables: name
+of the tracker, silent for (minutes), last seen.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## Connection problems
 
-## Dashboard
+- **Credentials refused** (HTTP 401, or a 403 of the Invoxia API on the list
+  of trackers): a wrong password tried again and again may lock the
+  account. Gladys therefore stops for **1 hour**, then **6 hours**, then
+  **24 hours** after each new refusal, never in a loop. The stop is kept in
+  `/data`: a restart, a reconnection of Gladys and the test button wait
+  too. An attempt still in flight when the integration stops counts as a
+  refusal. Saving the configuration with the same credentials makes **one**
+  attempt at once per series of refusals; other credentials are tried at
+  once. A reading that works forgets the refusals.
+- **Invoxia overloaded** (HTTP 429) or **server error** (HTTP 5xx): every
+  request is paused, for the time Invoxia asks (Retry-After) between 1
+  minute and 6 hours, never less than the refresh. The pause is kept in
+  `/data`. When it happens on the reading of a position, the status of the
+  trackers (battery, last seen) is published first.
+- **Access refused by something else than the API** (a 403 page of a
+  firewall or a proxy), **unexpected answer**, **Invoxia unreachable**
+  (network, 30 s timeout, certificate): retried after the refresh, then the
+  delay doubles up to 1 hour. The integration never gives up. A position
+  that cannot be read (a tracker without a subscription?) never blocks the
+  other values.
+- **Test the connection** reads again and says how many trackers answer; it
+  never shortens a stop nor a pause.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## Privacy
 
-## Troubleshooting
+No position, no tracker name or id, neither the e-mail address nor the
+password is ever written to a log or to the `/data` volume of the
+integration (it keeps there only a salted digest of the credentials after a
+refusal, and the end of a pause). The positions go to Gladys only and are
+kept in memory only. The external ids of the devices are digests of the
+Invoxia id of the tracker, never the id itself nor the serial number.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Limits
+
+- **Gladys does not move a Gladys user on its map from a tracker**: an
+  integration cannot publish the position of a user today (as for
+  PhoneTrack). A request is open on Gladys:
+  <https://github.com/GladysAssistant/Gladys/issues/3224>. Until then, the
+  zones of Gladys do not react to the trackers.
+- One account per integration, 20 trackers at most (the trackers created in
+  Gladys first).
+- Nothing is commanded: neither the mode of the tracker, nor the "lost"
+  mode, nor the alerts.
+- Never tested with a real tracker: see TODO.md in the repository.

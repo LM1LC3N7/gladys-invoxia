@@ -1,177 +1,153 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Invoxia",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Position, battery and silence of your Invoxia GPS trackers (bike, car, pets), read only.",
+    "fr": "Position, batterie et silence de vos traceurs GPS Invoxia (vélo, voiture, animaux), en lecture."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-invoxia:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-invoxia/main/cover.png",
+  "categories": ["services", "security"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "How it works", "fr": "Fonctionnement" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Gladys reads your Invoxia GPS trackers through the cloud of Invoxia, with the account of the Invoxia app. Each tracker becomes a Gladys device (Discovery tab): latitude, longitude, accuracy, battery, moving (when the tracker gives it), last seen and silent. Read only: Gladys never changes anything in Invoxia. Gladys does not move the position of a Gladys user on its map yet (see the documentation). Invoxia does not offer this access to its customers: it is the one of its app, used gently (5 minutes between two readings at least). Unofficial integration, not affiliated with Invoxia.",
+        "fr": "Gladys lit vos traceurs GPS Invoxia par le cloud d'Invoxia, avec le compte de l'application Invoxia. Chaque traceur devient un appareil Gladys (onglet Découverte) : latitude, longitude, précision, batterie, en mouvement (si le traceur le donne), vu pour la dernière fois et muet. Lecture seule : Gladys ne change jamais rien chez Invoxia. Gladys ne déplace pas encore la position d'un utilisateur Gladys sur sa carte (voir la documentation). Invoxia n'ouvre pas cet accès à ses clients : c'est celui de son application, utilisé avec modération (5 minutes au moins entre deux lectures). Intégration non officielle, sans lien avec Invoxia."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://gitlab.com/ezlo.picori/gps_tracker",
+          "label": { "en": "gps-tracker (reference)", "fr": "gps-tracker (référence)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "username",
+      "type": "string",
+      "label": { "en": "E-mail address", "fr": "Adresse e-mail" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "The e-mail address of your Invoxia account (the one of the Invoxia app). Never logged.",
+        "fr": "L'adresse e-mail de votre compte Invoxia (celle de l'application Invoxia). Jamais journalisée."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": { "en": "e.g. me@example.org", "fr": "ex. moi@example.org" },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "key": "password",
+      "type": "secret",
+      "label": { "en": "Password", "fr": "Mot de passe" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "The password of your Invoxia account. Kept by Gladys in its database, never shown again, never logged, sent only to the Invoxia API.",
+        "fr": "Le mot de passe de votre compte Invoxia. Gardé par Gladys dans sa base, jamais réaffiché, jamais journalisé, envoyé seulement à l'API Invoxia."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "poll_interval",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
+      "label": { "en": "Refresh", "fr": "Rafraîchissement" },
+      "description": {
+        "en": "How often Gladys reads the trackers (one request, plus one per tracker whose position changed). The trackers themselves report only every few minutes to every few hours, to save their battery.",
+        "fr": "Fréquence de lecture des traceurs (une requête, plus une par traceur dont la position a changé). Les traceurs eux-mêmes ne se signalent que toutes les quelques minutes à quelques heures, pour économiser leur batterie."
+      },
+      "required": true,
+      "default": "300",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        { "value": "300", "label": { "en": "Every 5 minutes", "fr": "Toutes les 5 minutes" } },
+        { "value": "600", "label": { "en": "Every 10 minutes", "fr": "Toutes les 10 minutes" } },
+        { "value": "900", "label": { "en": "Every 15 minutes", "fr": "Toutes les 15 minutes" } },
+        { "value": "1800", "label": { "en": "Every 30 minutes", "fr": "Toutes les 30 minutes" } },
+        { "value": "3600", "label": { "en": "Every hour", "fr": "Toutes les heures" } }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "silent_minutes",
+      "type": "select",
+      "label": { "en": "Silent after", "fr": "Muet après" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "A tracker that gave no news for this long is shown silent (feature Silent). The scene trigger has its own choice.",
+        "fr": "Un traceur qui n'a donné aucune nouvelle depuis ce délai est indiqué muet (fonction Muet). Le déclencheur de scène a son propre choix."
       },
-      "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "required": true,
+      "default": "1440",
+      "options": [
+        { "value": "60", "label": { "en": "1 hour", "fr": "1 heure" } },
+        { "value": "120", "label": { "en": "2 hours", "fr": "2 heures" } },
+        { "value": "240", "label": { "en": "4 hours", "fr": "4 heures" } },
+        { "value": "480", "label": { "en": "8 hours", "fr": "8 heures" } },
+        { "value": "720", "label": { "en": "12 hours", "fr": "12 heures" } },
+        { "value": "1440", "label": { "en": "24 hours", "fr": "24 heures" } },
+        { "value": "2880", "label": { "en": "48 hours", "fr": "48 heures" } }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "test_connection",
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "description": {
+        "en": "Reads the trackers again and says how many answer. After a refusal of the credentials, this button waits for the end of the stop; saving the configuration tries the same credentials again once per series of refusals (other credentials at once).",
+        "fr": "Relit les traceurs et indique combien répondent. Après un refus des identifiants, ce bouton attend la fin de l'arrêt ; enregistrer la configuration réessaie les mêmes identifiants une fois par série de refus (d'autres identifiants tout de suite)."
+      },
+      "timeout_seconds": 60
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "device_silent",
+      "label": { "en": "Tracker silent", "fr": "Traceur muet" },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "An Invoxia tracker created in Gladys gave no news for the chosen time (battery flat, tracker removed, no network). Once per silence: again only after news. Never for a delay already reached when the integration starts. Read at the chosen refresh.",
+        "fr": "Un traceur Invoxia créé dans Gladys n'a donné aucune nouvelle depuis le délai choisi (batterie vide, traceur retiré, pas de réseau). Une fois par silence : de nouveau seulement après des nouvelles. Jamais pour un délai déjà atteint au démarrage de l'intégration. Lu au rythme du rafraîchissement."
       },
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
+          "required": false,
+          "label": { "en": "Tracker (empty: any)", "fr": "Traceur (vide : tous)" }
         },
         {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
+          "key": "minutes",
+          "type": "select",
+          "required": true,
+          "label": { "en": "Silent for", "fr": "Muet depuis" },
           "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
+            { "value": "60", "label": { "en": "1 hour", "fr": "1 heure" } },
+            { "value": "120", "label": { "en": "2 hours", "fr": "2 heures" } },
+            { "value": "240", "label": { "en": "4 hours", "fr": "4 heures" } },
+            { "value": "480", "label": { "en": "8 hours", "fr": "8 heures" } },
+            { "value": "720", "label": { "en": "12 hours", "fr": "12 heures" } },
+            { "value": "1440", "label": { "en": "24 hours", "fr": "24 heures" } },
+            { "value": "2880", "label": { "en": "48 hours", "fr": "48 heures" } }
           ]
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "device_name",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": { "en": "Tracker name", "fr": "Nom du traceur" }
+        },
+        {
+          "key": "silent_for",
+          "type": "number",
+          "label": { "en": "Silent for (minutes)", "fr": "Muet depuis (minutes)" }
+        },
+        {
+          "key": "last_seen",
+          "type": "string",
+          "label": { "en": "Last seen (UTC)", "fr": "Vu pour la dernière fois (UTC)" }
         }
       ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

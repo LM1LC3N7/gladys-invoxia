@@ -1,67 +1,137 @@
-# Template de démonstration
+# Invoxia
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Vos traceurs GPS [Invoxia](https://www.invoxia.com/) (vélo, voiture, animaux,
+bagages…) dans Gladys, par le cloud d'Invoxia, avec le compte de
+l'application Invoxia.
 
-## Ce que vous obtenez
+- chaque traceur devient un appareil Gladys : **latitude**, **longitude**,
+  **précision** (m), **batterie** (%), **en mouvement** (si le traceur le
+  donne), **vu pour la dernière fois** et **muet** ;
+- un déclencheur de scène **Traceur muet** : aucune nouvelle du traceur
+  depuis 1 heure à 48 heures (au choix dans la scène) : batterie vide,
+  traceur retiré, plus de réseau.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Lecture seule, en interrogation : Gladys lit le cloud d'Invoxia à intervalle
+régulier et ne change jamais rien chez Invoxia (mode, alertes, zones restent
+dans l'application).
+
+> **Cette intégration n'a jamais été testée avec un vrai traceur Invoxia ni
+> un vrai compte.** Cette première version a été écrite d'après la
+> bibliothèque [gps-tracker](https://gitlab.com/ezlo.picori/gps_tracker)
+> (MIT), portée en JavaScript, et testée contre une fausse API Invoxia
+> seulement. Dites sur le forum Gladys ce qui marche et ce qui ne marche pas.
+
+Intégration non officielle, sans lien avec Invoxia.
+
+## Un accès à utiliser avec modération
+
+Invoxia n'ouvre pas d'API à ses clients particuliers (elle est réservée à son
+offre professionnelle). Cette intégration utilise, comme gps-tracker, l'API
+de l'application Invoxia avec vos identifiants. Ses conditions d'utilisation
+ne l'interdisent pas expressément, mais ne l'encouragent pas non plus :
+Invoxia pourrait agir sur un compte qui en abuse. L'intégration limite donc
+les requêtes au strict nécessaire : 5 minutes au moins entre deux lectures,
+et la position d'un traceur n'est relue que lorsque son état a changé.
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+- **Adresse e-mail** et **Mot de passe** : ceux de votre compte Invoxia
+  (l'application Invoxia). Le mot de passe est gardé par Gladys dans sa
+  base, jamais réaffiché, jamais écrit dans un journal, et envoyé seulement
+  à l'API Invoxia (`https://labs.invoxia.io`, en https, certificat vérifié).
+  L'adresse e-mail n'est écrite dans aucun journal non plus.
+- **Rafraîchissement** : de toutes les 5 minutes à toutes les heures (5
+  minutes par défaut). Une requête à chaque lecture, plus une par traceur
+  dont la position a changé. Les traceurs eux-mêmes ne se signalent que
+  toutes les quelques minutes à quelques heures (selon leur mode, pour
+  économiser leur batterie) : lire plus souvent n'apporterait rien.
+- **Muet après** : de 1 heure à 48 heures (24 heures par défaut) : le délai
+  sans nouvelle au bout duquel la fonction **Muet** s'allume.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+Ouvrez ensuite l'onglet **Découverte** et créez les traceurs à suivre.
+Seuls les traceurs créés reçoivent leurs valeurs.
 
-## Actions
+## Ce que montre chaque fonction
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+- **Latitude / Longitude** : la dernière position connue, en degrés,
+  arrondie à 6 décimales. Les deux partent toujours ensemble. La plus
+  récente de la dernière localisation du traceur et de la position donnée
+  par son état. Pas d'historique par défaut (vie privée ; vous pouvez
+  l'activer dans l'appareil).
+- **Précision** (m) : la précision de la dernière localisation, telle
+  qu'Invoxia la donne. Pas d'historique par défaut.
+- **Batterie** (%) : la batterie du traceur.
+- **En mouvement** (1 / 0) : lu dans le champ `stationary` de l'état du
+  traceur (0 : en mouvement, plus de 0 : immobile, -1 : inconnu).
+  **Interprétation à confirmer** sur un vrai traceur. La fonction
+  n'apparaît dans la Découverte qu'une fois la valeur vue pour ce traceur
+  (mettez alors à jour l'appareil créé pour l'ajouter).
+- **Vu pour la dernière fois** : la dernière nouvelle du traceur (son
+  dernier événement ou sa dernière position), sous la forme
+  `2026-10-18 08:00 UTC` (UTC : l'intégration ne connaît pas le fuseau de
+  Gladys).
+- **Muet** (1 / 0) : aucune nouvelle depuis le délai de la configuration.
+- Une valeur qu'Invoxia ne donne pas n'est pas publiée. Gladys accepte 300
+  états par minute d'une intégration : celle-ci en envoie 250 au plus.
 
-## Scènes
+## Déclencheur de scène : Traceur muet
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Choisissez le traceur (ou tous) et le délai (**obligatoire** : de 1 heure à
+48 heures). La scène démarre quand le traceur n'a donné aucune nouvelle
+depuis ce délai, à la lecture suivante. Seuls les traceurs créés dans Gladys
+déclenchent. **Une fois par silence** : de nouveau seulement après une
+nouvelle de moins d'une heure. Jamais pour un délai déjà atteint au
+démarrage de l'intégration (aucun événement à la première lecture), ni pour
+un traceur vu pour la première fois, ni à une lecture où l'horloge de Gladys
+a sauté. 30 événements au plus par lecture. Variables : nom du traceur, muet
+depuis (minutes), vu pour la dernière fois.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Problèmes de connexion
 
-## Tableau de bord
+- **Identifiants refusés** (HTTP 401, ou un 403 de l'API Invoxia sur la
+  liste des traceurs) : un mauvais mot de passe essayé encore et encore
+  peut bloquer le compte. Gladys s'arrête donc **1 heure**, puis **6
+  heures**, puis **24 heures** après chaque nouveau refus, jamais en
+  boucle. L'arrêt est gardé dans `/data` : un redémarrage, une reconnexion
+  de Gladys et le bouton de test attendent aussi. Un essai encore en cours
+  quand l'intégration s'arrête compte comme un refus. Enregistrer la
+  configuration avec les mêmes identifiants fait **un** essai tout de suite
+  par série de refus ; d'autres identifiants sont essayés tout de suite.
+  Une lecture réussie oublie les refus.
+- **Invoxia surchargé** (HTTP 429) ou **erreur serveur** (HTTP 5xx) :
+  toutes les requêtes sont suspendues, le temps qu'Invoxia demande
+  (Retry-After) entre 1 minute et 6 heures, jamais moins que le
+  rafraîchissement. La pause est gardée dans `/data`. Si cela arrive sur la
+  lecture d'une position, l'état des traceurs (batterie, vu pour la
+  dernière fois) est publié d'abord.
+- **Accès refusé par autre chose que l'API** (une page 403 d'un pare-feu ou
+  d'un proxy), **réponse inattendue**, **Invoxia injoignable** (réseau,
+  délai de 30 s dépassé, certificat) : nouvel essai après le
+  rafraîchissement, puis le délai double jusqu'à 1 heure. L'intégration
+  n'abandonne jamais. Une position qui ne se lit pas (un traceur sans
+  abonnement ?) ne bloque pas les autres valeurs.
+- **Tester la connexion** relit et dit combien de traceurs répondent ; il
+  ne raccourcit jamais un arrêt ni une pause.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+## Vie privée
 
-## Dépannage
+Aucune position, aucun nom ni identifiant de traceur, ni l'adresse e-mail
+ni le mot de passe n'est jamais écrit dans un journal ni dans le volume
+`/data` de l'intégration (elle n'y garde qu'une empreinte salée des
+identifiants après un refus, et la fin d'une pause). Les positions ne vont
+qu'à Gladys et ne sont gardées qu'en mémoire. Les identifiants externes des
+appareils sont des empreintes de l'identifiant Invoxia du traceur, jamais
+l'identifiant lui-même ni le numéro de série.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Limites
+
+- **Gladys ne déplace pas un utilisateur Gladys sur sa carte d'après un
+  traceur** : une intégration ne peut pas publier la position d'un
+  utilisateur aujourd'hui (comme pour PhoneTrack). Une demande est ouverte
+  sur Gladys : <https://github.com/GladysAssistant/Gladys/issues/3224>.
+  D'ici là, les zones de Gladys ne réagissent pas aux traceurs.
+- Un compte par intégration, 20 traceurs au plus (les traceurs créés dans
+  Gladys d'abord).
+- Rien n'est commandé : ni le mode du traceur, ni le mode « perdu », ni les
+  alertes.
+- Jamais testée avec un vrai traceur : voir TODO.md dans le dépôt.

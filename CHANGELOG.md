@@ -12,44 +12,18 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
-
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+- First version, never tested with a real Invoxia tracker nor account: the
+  Invoxia GPS trackers of one account, read through the cloud of Invoxia
+  (the API of the Invoxia app, as gps-tracker uses it). Read only.
+- One Gladys device per tracker: latitude, longitude, accuracy, battery,
+  moving (when the tracker gives it), last seen and silent (read only).
+  Positions keep no history by default.
+- Scene trigger "Tracker silent" (1 hour to 48 hours, chosen in the scene):
+  once per silence, never for a delay already reached at start.
+- Refresh every 5 minutes to every hour (5 minutes by default); the location
+  of a tracker is read again only when its status moved on. "Silent after"
+  delay of 1 hour to 48 hours (24 hours by default).
+- The password kept by Gladys and never shown again, never logged; refused
+  credentials (HTTP 401) stop for 1 h, then 6 h, then 24 h, kept in
+  `/data`; HTTP 429 and 5xx pause every request, bounded and kept in `/data`.
+- Button "Test the connection".
