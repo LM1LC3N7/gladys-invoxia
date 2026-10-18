@@ -24,6 +24,25 @@ the notes of the version's GitHub Release.
   of a tracker is read again only when its status moved on. "Silent after"
   delay of 1 hour to 48 hours (24 hours by default).
 - The password kept by Gladys and never shown again, never logged; refused
-  credentials (HTTP 401) stop for 1 h, then 6 h, then 24 h, kept in
-  `/data`; HTTP 429 and 5xx pause every request, bounded and kept in `/data`.
+  credentials (HTTP 401 or 403 of the API on the list) stop for 1 h, then
+  6 h, then 24 h, kept in `/data`; HTTP 429 and 5xx pause every request,
+  bounded and kept in `/data`.
 - Button "Test the connection".
+
+### Changed (review before the first release)
+
+- The position of one tracker that fails (5xx, timeout) no longer stops
+  the integration: only that tracker waits (2 to 16 readings, or until its
+  status changes); a pause only when the list fails, on a 429, or when
+  several trackers fail in the same reading. A single 401 on a position
+  only skips that tracker; a 403, 404 or unreadable position is kept until
+  the status changes.
+- A 429 or 5xx answered on a position during a reconnection of Gladys is
+  kept in `/data`; a restart waits for the retry of a failed reading too.
+- A date more than a day in the future is ignored; newer news arms again
+  the "silent" thresholds above its age.
+- Saving the configuration uses its one attempt only when the request
+  leaves, never during a pause; `/data` keeps a 4-character digest of the
+  credentials instead of a full one.
+- Docs: what Gladys keeps of the positions, the external id a non-secret
+  digest, the terms of use as stated by the author of gps-tracker.

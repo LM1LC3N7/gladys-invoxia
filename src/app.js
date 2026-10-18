@@ -55,6 +55,9 @@ const CLOCK_JUMP_MS = 5 * 60_000;
 /** The configuration could not be read from Gladys: try again after this. */
 const CONFIG_RETRY_MS = 60_000;
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+/** A tracker whose locations fail waits 2, 4, 8, then 16 rounds at most. */
+const LOCATION_BACKOFF_ROUNDS = 16;
 /** Entries per publishTransports call (the SDK refuses more). */
 export const TRANSPORTS_PER_CALL = 100;
 const THRESHOLDS = SILENT_MINUTES.map(Number);
@@ -112,19 +115,26 @@ export class InvoxiaApp {
      * In memory only, kept across a restart of the app for the same account
      * (a reconnection to Gladys), forgotten for another one:
      *   known      the trackers last read (Discovery during a pause)
-     *   silence    key -> Set of the thresholds (minutes) already reached in
-     *              the current silence of the tracker (fired, or reached
-     *              before the tracker was first seen: never fired then)
+     *   silence    key -> { since, reached }: the date of the news that
+     *              opened the current silence, and the thresholds (minutes)
+     *              already reached in it (fired, or reached before the
+     *              tracker was first seen: never fired then)
      *   moving     the keys of the trackers whose status gave a motion
-     *   locations  key -> { mark, location }: the last location read and the
-     *              date of the status it was read for (read again only when
-     *              that date changes). Never written to /data.
+     *   locations  key -> { mark, location, tried, failedMark?, failCount?,
+     *              retryRound? }: the last location read, the date of the
+     *              status it was read for (read again only when that date
+     *              changes), the round of the last attempt, and the back-off
+     *              of a tracker whose locations fail. Never written to /data.
      */
     this.memoryKey = null;
     this.known = null;
     this.silence = new Map();
     this.moving = new Set();
     this.locations = new Map();
+    /** Readings done (the back-off of a tracker counts in rounds). */
+    this.round = 0;
+    /** The last answer of the locations endpoint was a 401. */
+    this.locations401 = false;
     /**
      * After a failed reading: { key (HMAC of the credentials), at, delay,
      * message }, so that a reconnection to Gladys does not skip the wait.
@@ -144,6 +154,8 @@ export class InvoxiaApp {
     this.blocked = false;
     this.pausedUntil = 0;
     this.refusalStep = 0;
+    /** A saved configuration may make its one attempt within a stop (see run()). */
+    this.forceAttempt = false;
     this.retryDelay = this.minRetry();
     /** key -> tracker, the followed trackers of the last reading. */
     this.devices = new Map();
@@ -184,11 +196,17 @@ export class InvoxiaApp {
     return this.enqueue(() => this.run(rawConfig, { force, immediate }));
   }
 
-  /** The values a refusal is about (HMAC with the salt of /data: never the credentials). */
+  /**
+   * Which credentials a refusal or a wait is about: 4 hex of an HMAC (salt of
+   * /data) of the credentials. Short on purpose: it only tells a change of
+   * credentials, and is useless to check a guessed password (1 chance in
+   * 65536 that other credentials look the same: they then wait the stop).
+   */
   async refusalKey(config) {
     return createHmac('sha256', await this.store.salt())
       .update(JSON.stringify([config.username.toLowerCase(), config.password]))
-      .digest('hex');
+      .digest('hex')
+      .slice(0, 4);
   }
 
   async stop() {
@@ -328,6 +346,7 @@ export class InvoxiaApp {
       this.silence = new Map();
       this.moving = new Set();
       this.locations = new Map();
+      this.locations401 = false;
       this.retryWait = null;
     }
     this.client = new InvoxiaClient({
@@ -370,7 +389,9 @@ export class InvoxiaApp {
       }
       if (this.now() < until) {
         if (force && !refusal.forced) {
-          await this.writeRefusal(base, { ...refusal, forced: true });
+          // The one forced attempt of this series: marked used by read(),
+          // when its request really leaves (never during a pause).
+          this.forceAttempt = true;
         } else {
           this.blocked = true;
           await this.publishKnown();
@@ -401,12 +422,16 @@ export class InvoxiaApp {
     // After a failed reading, a reconnection to Gladys waits for the retry
     // like the loop would (never faster than the interval); the button and
     // a saved configuration read at once.
-    const waiting = this.retryWait;
-    if (!force && !immediate && waiting?.key === key) {
+    // The wait is also kept in /data: a restart of the container waits too.
+    const waiting = this.retryWait?.key === key ? this.retryWait : this.storedRetry(key);
+    if (!force && !immediate && waiting) {
       if (this.now() < waiting.at) {
         this.retryDelay = waiting.delay;
         await this.publishKnown();
-        await this.setStatus(false, waiting.message);
+        await this.setStatus(
+          false,
+          waiting.message ?? T.status.retryPending(waiting.at - this.now()),
+        );
         this.schedule(waiting.at - this.now(), () => this.connect(generation));
         return;
       }
@@ -433,6 +458,21 @@ export class InvoxiaApp {
 
   pauseKey() {
     return `pausedUntil|${this.baseKey}`;
+  }
+
+  /**
+   * The retry wait after a failed reading, kept in /data as `retryAt|<account
+   * digest>` = `<credential key>|<end ms>|<delay ms>`: { key, at, delay } or
+   * null. Its end is capped by the longest retry delay.
+   */
+  storedRetry(key, baseKey = this.baseKey) {
+    const raw = baseKey ? this.store.get('meta', `retryAt|${baseKey}`) : null;
+    if (!raw) return null;
+    const [k, at, delay] = raw.split('|');
+    if (k !== key) return null;
+    const end = Math.min(Number(at) || 0, this.now() + INTERVALS.RETRY_MAX_MS);
+    const wait = Math.min(Math.max(Number(delay) || 0, this.minRetry()), INTERVALS.RETRY_MAX_MS);
+    return { key, at: end, delay: wait };
   }
 
   /** Stopped before any request (configuration): status and badges. */
@@ -604,6 +644,10 @@ export class InvoxiaApp {
       delay: this.retryDelay,
       message,
     };
+    if (this.baseKey) {
+      const { key, at, delay: next } = this.retryWait;
+      await this.store.set('meta', `retryAt|${this.baseKey}`, `${key}|${at}|${next}`);
+    }
     if (generation !== this.generation) return;
     await this.setStatus(false, message);
     this.schedule(delay, () => this.connect(generation));
@@ -685,8 +729,11 @@ export class InvoxiaApp {
         step: context.step,
         until: stored?.key === context.key ? stored.until : this.now(),
         pending: true,
-        forced: stored?.key === context.key ? stored.forced : false,
+        // The one forced attempt of a saved configuration is used now that
+        // its request leaves.
+        forced: (stored?.key === context.key && stored.forced) || this.forceAttempt,
       });
+      this.forceAttempt = false;
     }
     let all;
     try {
@@ -699,8 +746,10 @@ export class InvoxiaApp {
     if (this.storedRefusal(context.baseKey)?.key === context.key) {
       await this.writeRefusal(context.baseKey, null);
     }
-    if (this.store.get('meta', `pausedUntil|${context.baseKey}`)) {
-      await this.store.set('meta', `pausedUntil|${context.baseKey}`, null);
+    for (const name of ['pausedUntil', 'retryAt']) {
+      if (this.store.get('meta', `${name}|${context.baseKey}`)) {
+        await this.store.set('meta', `${name}|${context.baseKey}`, null);
+      }
     }
     // A later failure of this reading (the locations) is no longer within a
     // series of refusals.
@@ -723,49 +772,97 @@ export class InvoxiaApp {
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
     // The locations: one request per tracker whose status moved on (or
-    // without a date to compare). A failure of this secondary endpoint never
-    // blocks the status of the trackers; 401, 429 and 5xx end the round
-    // after the publication (refusal or pause of every path), a transport
-    // failure skips the other location reads of this round.
+    // without a date to compare), the tracker tried longest ago first. A
+    // failure of this secondary endpoint never blocks the status of the
+    // trackers:
+    //   429                    every path pauses (after the publication);
+    //   5xx, timeout, network  that tracker only waits (its own back-off,
+    //                          or until its status moves on); two trackers
+    //                          failing in the same round fail the round
+    //                          (pause for a 5xx, retry otherwise);
+    //   401                    that tracker only waits, unless the previous
+    //                          answer of this endpoint was a 401 too: then
+    //                          the credentials are refused;
+    //   403, 404, unreadable   that position is kept as it was until the
+    //                          status of the tracker moves on.
+    this.round += 1;
+    const round = this.round;
+    const tried = (tracker) => this.locations.get(tracker.key)?.tried ?? -1;
+    const order = [...followed].sort((a, b) => tried(a) - tried(b));
     let secondary = null;
-    let skip = false;
-    for (const tracker of followed) {
+    let failures = 0;
+    for (const tracker of order) {
+      if (secondary) break;
       const mark = tracker.lastLocationMs ?? tracker.lastEventMs ?? null;
       const cached = this.locations.get(tracker.key);
-      if ((!cached || mark === null || cached.mark !== mark) && !skip) {
-        try {
-          const location = await client.lastLocation(tracker.id);
-          this.locations.set(tracker.key, { mark, location });
-        } catch (err) {
-          if (!(err instanceof InvoxiaError)) throw err;
-          if (isRefused(err) || err.status === 429 || err.status >= 500) {
-            secondary = err;
-            skip = true;
-          } else if (TRANSPORT.has(err.code)) {
-            skip = true;
-          }
-          this.logger.debug(`A location was not read: ${this.describe(err)}`);
+      const changed = !cached || mark === null || cached.mark !== mark;
+      const waiting = cached?.failedMark === mark && round < (cached?.retryRound ?? 0);
+      if (!changed || waiting) continue;
+      try {
+        const location = await client.lastLocation(tracker.id);
+        this.locations.set(tracker.key, { mark, location, tried: round });
+        this.locations401 = false;
+      } catch (err) {
+        if (!(err instanceof InvoxiaError)) throw err;
+        this.logger.debug(`A location was not read: ${this.describe(err)}`);
+        const kept = cached?.location ?? null;
+        const backOff = () => {
+          const count = (cached?.failedMark === mark ? (cached.failCount ?? 0) : 0) + 1;
+          this.locations.set(tracker.key, {
+            mark: cached?.mark ?? null,
+            location: kept,
+            tried: round,
+            failedMark: mark,
+            failCount: count,
+            retryRound: round + Math.min(2 ** count, LOCATION_BACKOFF_ROUNDS),
+          });
+        };
+        if (err.status === 429) {
+          secondary = err;
+        } else if (err.status === 401) {
+          if (this.locations401) secondary = err;
+          else backOff();
+          this.locations401 = true;
+        } else if (err.status >= 500 || TRANSPORT.has(err.code)) {
+          backOff();
+          failures += 1;
+          if (failures >= 2) secondary = err;
+        } else {
+          this.locations.set(tracker.key, { mark, location: kept, tried: round });
         }
       }
-      if (client !== this.client) return;
-      const location = this.locations.get(tracker.key)?.location ?? null;
+      if (client !== this.client) {
+        // What the API answered is kept in /data even after a reconnection.
+        if (secondary) await this.fail(secondary, context);
+        return;
+      }
+    }
+
+    const now = this.now();
+    // A date more than a day ahead is no date (a tracker with a wrong
+    // clock): dropped field by field, before the newest is taken.
+    const plausible = (ms) => (ms !== null && ms !== undefined && ms <= now + DAY ? ms : null);
+    for (const tracker of followed) {
+      const read = this.locations.get(tracker.key)?.location ?? null;
+      const location = read && plausible(read.timestampMs) !== null ? read : null;
+      const lastLocationMs = plausible(tracker.lastLocationMs);
       // The newer of the location read and the one of the status.
       const fromStatus =
         tracker.statusLat !== null &&
-        (!location || (tracker.lastLocationMs ?? 0) > location.timestampMs);
+        lastLocationMs !== null &&
+        (!location || lastLocationMs > location.timestampMs);
       tracker.lat = fromStatus ? tracker.statusLat : (location?.lat ?? null);
       tracker.lon = fromStatus ? tracker.statusLon : (location?.lon ?? null);
       tracker.accuracy = fromStatus ? null : (location?.accuracy ?? null);
       tracker.timestampMs = newest(
-        tracker.lastEventMs,
-        tracker.lastLocationMs,
+        plausible(tracker.lastEventMs),
+        lastLocationMs,
         location?.timestampMs,
       );
       if (tracker.moving !== null) this.moving.add(tracker.key);
       tracker.hasMoving = this.moving.has(tracker.key);
     }
 
-    const now = this.now();
     // A jump of the wall clock between two readings (NTP after a start with
     // a wrong clock): this reading is a new baseline, no event.
     const mono = this.monotonic();
@@ -790,9 +887,19 @@ export class InvoxiaApp {
         if (tracker.timestampMs - now > FUTURE_MS) continue;
         // A tracker seen for the first time: what is already reached is
         // never fired (no event at the first reading, nor for a new tracker).
-        const first = jumped || !this.silence.has(tracker.key);
-        const reached = this.silence.get(tracker.key) ?? new Set();
-        this.silence.set(tracker.key, reached);
+        const state = this.silence.get(tracker.key);
+        const first = jumped || !state;
+        const entry = state ?? { since: tracker.timestampMs, reached: new Set() };
+        if (state && tracker.timestampMs > state.since) {
+          // Newer news, even old ones: the thresholds above the new age are
+          // armed again (a late batch of the same news never is).
+          for (const minutes of [...entry.reached]) {
+            if (minutes * MINUTE > age) entry.reached.delete(minutes);
+          }
+          entry.since = tracker.timestampMs;
+        }
+        this.silence.set(tracker.key, entry);
+        const reached = entry.reached;
         if (age < THRESHOLDS[0] * MINUTE) {
           // Newer news: the silence is over.
           reached.clear();

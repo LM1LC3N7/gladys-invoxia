@@ -68,6 +68,8 @@ export function createFakeInvoxia() {
     },
     /** { status, headers, body, path } answered once each (FIFO); `path` limits it to a prefix. */
     failures: [],
+    /** path prefix -> HTTP status answered every time. */
+    broken: {},
     unreachable: false,
     inFlight: 0,
     maxInFlight: 0,
@@ -82,6 +84,8 @@ export function createFakeInvoxia() {
   });
 
   function answer(url, headers) {
+    const broken = Object.entries(fake.broken).find(([path]) => url.pathname.startsWith(path));
+    if (broken) return json(broken[1], { detail: 'broken' });
     const index = fake.failures.findIndex((f) => !f.path || url.pathname.startsWith(f.path));
     if (index >= 0) {
       const [f] = fake.failures.splice(index, 1);

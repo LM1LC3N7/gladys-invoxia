@@ -347,53 +347,209 @@ test('HTTP 429 without Retry-After, and 5xx: paused at least for the interval', 
   assert.equal(gladys.fake.connectionStatus.connected, true);
 });
 
-test('the locations endpoint fails: the status of the trackers is still published', async () => {
+test('a 403 on the locations of a tracker keeps its position until its status moves on', async () => {
   const invoxia = createFakeInvoxia();
-  // A 403 on one tracker: that position only is skipped.
   invoxia.failures.push({ status: 403, path: `/devices/${REX}/`, body: '{"detail":"no"}' });
-  const { gladys, timers, dataDir } = await setup({ invoxia });
+  const { gladys, timers } = await setup({ invoxia });
   assert.equal(gladys.fake.connectionStatus.connected, true);
   assert.equal(last(gladys, REX, 'latitude'), undefined);
   assert.equal(last(gladys, REX, 'battery'), 15);
   assert.equal(last(gladys, VELO, 'latitude'), 48.8566);
-  // A 503 on a location: the states go, then every path pauses.
-  invoxia.failures.push({ status: 503, path: `/devices/${REX}/` });
-  statusOf(invoxia, REX).battery = 14;
+  const rex = () => invoxia.locationRequests().filter((r) => r.path.includes(`/${REX}/`)).length;
   await poll(timers);
-  assert.equal(last(gladys, REX, 'battery'), 14);
+  assert.equal(rex(), 1, 'not read again while its status stays');
+  statusOf(invoxia, REX).last_event = '2026-10-18T07:59:00Z';
+  await poll(timers);
+  assert.equal(rex(), 2);
+  assert.equal(last(gladys, REX, 'latitude'), 45.764);
+});
+
+test('a permanent 500 on one tracker: the other keeps its position, still connected', async () => {
+  const invoxia = createFakeInvoxia();
+  invoxia.broken[`/devices/${REX}/`] = 500;
+  const { gladys, timers, dataDir } = await setup({ invoxia });
+  const rex = () => invoxia.locationRequests().filter((r) => r.path.includes(`/${REX}/`)).length;
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+  assert.equal(last(gladys, VELO, 'latitude'), 48.8566);
+  assert.equal(last(gladys, REX, 'battery'), 15);
+  assert.equal(rex(), 1);
+  // Its own back-off: 2 rounds, then 4...
+  await poll(timers);
+  assert.equal(rex(), 1);
+  await poll(timers);
+  assert.equal(rex(), 2);
+  await poll(timers);
+  assert.equal(rex(), 2);
+  // ...unless its status moves on.
+  statusOf(invoxia, REX).last_event = '2026-10-18T07:59:00Z';
+  await poll(timers);
+  assert.equal(rex(), 3);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+  assert.ok(!storeText(dataDir).includes('pausedUntil'), 'no global pause');
+  // The other tracker moves on: still read.
+  statusOf(invoxia, VELO).last_event = '2026-10-18T08:20:00Z';
+  invoxia.locations[VELO] = [location({ datetime: '2026-10-18T08:19:00Z', lat: '48.9' })];
+  await poll(timers);
+  assert.equal(last(gladys, VELO, 'latitude'), 48.9);
+});
+
+test('two trackers failing in the same round: the states go, then every path pauses', async () => {
+  const invoxia = createFakeInvoxia();
+  invoxia.broken[`/devices/${REX}/`] = 503;
+  invoxia.broken[`/devices/${VELO}/`] = 503;
+  const { gladys, timers, dataDir } = await setup({ invoxia });
+  assert.equal(last(gladys, REX, 'battery'), 15);
+  assert.equal(last(gladys, VELO, 'battery'), 80);
   assert.match(gladys.fake.connectionStatus.message.en, /server error \(HTTP 503/);
   assert.ok(storeText(dataDir).includes('pausedUntil'));
   assert.deepEqual(timers.delays(), [POLL]);
-  // A timeout: the other location reads of the round are skipped, still connected.
-  await timers.run();
-  assert.equal(gladys.fake.connectionStatus.connected, true);
-  const before = invoxia.locationRequests().length;
-  statusOf(invoxia, VELO).last_event = '2026-10-18T08:20:00Z';
-  statusOf(invoxia, REX).last_event = '2026-10-18T08:20:00Z';
+});
+
+test('a timeout on the locations of one tracker: that one waits, the other is read', async () => {
+  const invoxia = createFakeInvoxia();
   const original = invoxia.request;
   invoxia.request = async (url, options) => {
-    if (url.includes('tracker_data')) {
+    if (url.includes(`/${REX}/tracker_data`)) {
       invoxia.requests.push({ url, path: new URL(url).pathname, headers: {} });
       const { InvoxiaError, CODES } = await import('../src/invoxia/errors.js');
       throw new InvoxiaError(CODES.TIMEOUT, 'No answer within 30 s');
     }
     return original(url, options);
   };
-  running.request = invoxia.request;
-  running.client.request = invoxia.request;
-  await poll(timers);
-  assert.equal(invoxia.locationRequests().length, before + 1, 'one timeout, then none');
+  const { gladys } = await setup({ invoxia });
   assert.equal(gladys.fake.connectionStatus.connected, true);
-  assert.equal(last(gladys, VELO, 'last_seen'), '2026-10-18 08:20 UTC');
+  assert.equal(last(gladys, VELO, 'latitude'), 48.8566);
+  assert.equal(last(gladys, REX, 'latitude'), undefined);
 });
 
-test('a 401 on the locations is a refusal too (after the states)', async () => {
+test('one 401 on the locations skips that tracker; two in a row are a refusal', async () => {
   const invoxia = createFakeInvoxia();
   invoxia.failures.push({ status: 401, path: `/devices/${REX}/` });
-  const { gladys, timers } = await setup({ invoxia });
-  assert.equal(last(gladys, REX, 'battery'), 15);
+  const first = await setup({ invoxia });
+  assert.equal(first.gladys.fake.connectionStatus.connected, true);
+  assert.equal(last(first.gladys, VELO, 'latitude'), 48.8566);
+  await running.stop();
+  const twice = createFakeInvoxia();
+  twice.failures.push(
+    { status: 401, path: `/devices/${REX}/` },
+    { status: 401, path: `/devices/${VELO}/` },
+  );
+  const { gladys, timers } = await setup({ invoxia: twice });
+  assert.equal(last(gladys, REX, 'battery'), 15, 'the states first');
   assert.match(gladys.fake.connectionStatus.message.en, /refused the e-mail address/);
   assert.deepEqual(timers.delays(), [HOUR]);
+});
+
+test('a 429 on a location answered during a reconnection is kept in /data', async () => {
+  const invoxia = createFakeInvoxia();
+  const { gladys, timers, app, dataDir } = await setup({ invoxia });
+  invoxia.failures.push({
+    status: 429,
+    path: `/devices/${REX}/`,
+    headers: { 'retry-after': '3600' },
+  });
+  statusOf(invoxia, REX).last_event = '2026-10-18T07:59:00Z';
+  // Hold the location requests only.
+  let release;
+  let held = false;
+  const gate = new Promise((resolve) => (release = resolve));
+  const original = invoxia.request;
+  invoxia.request = async (url, options) => {
+    if (url.includes('tracker_data')) {
+      held = true;
+      await gate;
+    }
+    return original(url, options);
+  };
+  app.client.request = invoxia.request;
+  const lists = invoxia.listRequests().length;
+  const polling = poll(timers);
+  for (let i = 0; i < 100 && !held; i += 1) await tick();
+  assert.ok(held, 'the location request left');
+  gladys.emit('disconnected');
+  await tick();
+  gladys.emit('connected');
+  await tick();
+  release();
+  await polling;
+  for (let i = 0; i < 5; i += 1) await tick();
+  await app.queue;
+  assert.ok(storeText(dataDir).includes('pausedUntil'));
+  assert.equal(invoxia.listRequests().length, lists + 1, 'no new reading of the list');
+  assert.match(gladys.fake.connectionStatus.message.en, /pause goes on/);
+});
+
+test('a date more than a day ahead is no date: the older news makes the tracker silent', async () => {
+  const invoxia = createFakeInvoxia();
+  const { gladys, timers } = await setup({ invoxia });
+  Object.assign(statusOf(invoxia, REX), {
+    last_event: '2099-01-01T00:00:00Z',
+    last_location: '2026-10-15T08:00:00Z',
+  });
+  invoxia.locations[REX] = [];
+  await poll(timers);
+  assert.equal(last(gladys, REX, 'silent'), 1);
+  assert.equal(last(gladys, REX, 'last_seen'), '2026-10-15 08:00 UTC');
+  const fired = gladys.fake.sceneEvents.filter((e) => e.data.device_name === 'Rex');
+  assert.ok(
+    fired.some((e) => e.data.minutes === '2880'),
+    'the trigger left',
+  );
+});
+
+test('newer news re-arms the thresholds above the new age', async () => {
+  const { gladys, invoxia, timers, clock } = await setup();
+  // Rex: 150 min silent at start (60 and 120 reached, never fired).
+  statusOf(invoxia, REX).last_event = '2026-10-18T06:30:00Z';
+  clock.now = T0 + 5 * MIN;
+  await poll(timers);
+  assert.equal(gladys.fake.sceneEvents.length, 0, '95 min: nothing new');
+  clock.now = T0 + 30 * MIN;
+  await poll(timers);
+  assert.deepEqual(
+    gladys.fake.sceneEvents.map((e) => [e.data.device_name, e.data.minutes]),
+    [['Rex', '120']],
+    '120 armed again by the news of 06:30',
+  );
+});
+
+test('the forced attempt is not used during a pause', async () => {
+  const invoxia = createFakeInvoxia();
+  const { gladys, timers, clock } = await setup({ invoxia, config: { password: WRONG } });
+  // The attempt after the stop meets a 429: a pause within the series of refusals.
+  invoxia.failures.push({ status: 429, headers: { 'retry-after': '600' } });
+  clock.now = T0 + HOUR;
+  await timers.run();
+  assert.equal(invoxia.requests.length, 2);
+  for (let i = 0; i < 2; i += 1) {
+    await gladys.fake.configUpdated({ ...BASE_CONFIG, password: WRONG });
+    assert.equal(invoxia.requests.length, 2, 'nothing sent during the pause');
+    assert.match(gladys.fake.connectionStatus.message.en, /pause goes on/);
+  }
+  // The pause ends: the forced attempt leaves (refused), then it is used.
+  clock.now += 10 * MIN;
+  await timers.run();
+  assert.equal(invoxia.requests.length, 3);
+  await gladys.fake.configUpdated({ ...BASE_CONFIG, password: WRONG });
+  assert.equal(invoxia.requests.length, 3);
+  assert.match(gladys.fake.connectionStatus.message.en, /Already tried again/);
+});
+
+test('a restart after a failed reading waits for the retry too (kept in /data)', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'invoxia-app-'));
+  const invoxia = createFakeInvoxia();
+  const { timers } = await setup({ invoxia, dataDir });
+  invoxia.unreachable = true;
+  await poll(timers);
+  await running.stop();
+  invoxia.unreachable = false;
+  const before = invoxia.requests.length;
+  const second = await setup({ invoxia, dataDir, now: T0 + MIN });
+  assert.equal(invoxia.requests.length, before, 'no reading before the retry');
+  assert.deepEqual(second.timers.delays(), [POLL - MIN]);
+  assert.match(second.gladys.fake.connectionStatus.message.en, /last reading of Invoxia failed/);
+  await second.timers.run();
+  assert.equal(second.gladys.fake.connectionStatus.connected, true);
 });
 
 test('after a stop, credentials that work then a 429 on a location: a pause, no refusal', async () => {

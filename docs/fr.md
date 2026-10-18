@@ -27,9 +27,10 @@ Intégration non officielle, sans lien avec Invoxia.
 
 Invoxia n'ouvre pas d'API à ses clients particuliers (elle est réservée à son
 offre professionnelle). Cette intégration utilise, comme gps-tracker, l'API
-de l'application Invoxia avec vos identifiants. Ses conditions d'utilisation
-ne l'interdisent pas expressément, mais ne l'encouragent pas non plus :
-Invoxia pourrait agir sur un compte qui en abuse. L'intégration limite donc
+de l'application Invoxia avec vos identifiants. Selon l'auteur de
+gps-tracker, les conditions d'utilisation d'Invoxia ne l'interdisent pas
+expressément, mais ne l'encouragent pas non plus, et Invoxia pourrait agir
+sur un compte qui en abuse. L'intégration limite donc
 les requêtes au strict nécessaire : 5 minutes au moins entre deux lectures,
 et la position d'un traceur n'est relue que lorsque son état a changé.
 
@@ -79,8 +80,8 @@ Seuls les traceurs créés reçoivent leurs valeurs.
 Choisissez le traceur (ou tous) et le délai (**obligatoire** : de 1 heure à
 48 heures). La scène démarre quand le traceur n'a donné aucune nouvelle
 depuis ce délai, à la lecture suivante. Seuls les traceurs créés dans Gladys
-déclenchent. **Une fois par silence** : de nouveau seulement après une
-nouvelle de moins d'une heure. Jamais pour un délai déjà atteint au
+déclenchent. **Une fois par silence** : une nouvelle plus récente (même
+ancienne) réarme seulement les délais plus longs que son âge. Jamais pour un délai déjà atteint au
 démarrage de l'intégration (aucun événement à la première lecture), ni pour
 un traceur vu pour la première fois, ni à une lecture où l'horloge de Gladys
 a sauté. 30 événements au plus par lecture. Variables : nom du traceur, muet
@@ -88,8 +89,9 @@ depuis (minutes), vu pour la dernière fois.
 
 ## Problèmes de connexion
 
-- **Identifiants refusés** (HTTP 401, ou un 403 de l'API Invoxia sur la
-  liste des traceurs) : un mauvais mot de passe essayé encore et encore
+- **Identifiants refusés** (HTTP 401 ou 403 de l'API Invoxia sur la liste
+  des traceurs, ou deux 401 de suite sur les positions ; un seul 401 sur
+  une position ne fait qu'attendre ce traceur) : un mauvais mot de passe essayé encore et encore
   peut bloquer le compte. Gladys s'arrête donc **1 heure**, puis **6
   heures**, puis **24 heures** après chaque nouveau refus, jamais en
   boucle. L'arrêt est gardé dans `/data` : un redémarrage, une reconnexion
@@ -98,18 +100,31 @@ depuis (minutes), vu pour la dernière fois.
   configuration avec les mêmes identifiants fait **un** essai tout de suite
   par série de refus ; d'autres identifiants sont essayés tout de suite.
   Une lecture réussie oublie les refus.
-- **Invoxia surchargé** (HTTP 429) ou **erreur serveur** (HTTP 5xx) :
-  toutes les requêtes sont suspendues, le temps qu'Invoxia demande
-  (Retry-After) entre 1 minute et 6 heures, jamais moins que le
-  rafraîchissement. La pause est gardée dans `/data`. Si cela arrive sur la
-  lecture d'une position, l'état des traceurs (batterie, vu pour la
-  dernière fois) est publié d'abord.
+- **Invoxia surchargé** (HTTP 429, sur n'importe quelle requête) ou
+  **erreur serveur** (HTTP 5xx sur la liste des traceurs) : toutes les
+  requêtes sont suspendues, le temps qu'Invoxia demande (Retry-After)
+  entre 1 minute et 6 heures, jamais moins que le rafraîchissement. La
+  pause est gardée dans `/data`, même quand la réponse arrive pendant une
+  reconnexion de Gladys. Si cela arrive sur la lecture d'une position,
+  l'état des traceurs (batterie, vu pour la dernière fois) est publié
+  d'abord.
+- **Position d'un seul traceur en échec** (HTTP 5xx, délai dépassé) : seul
+  ce traceur attend (2, 4, 8 puis 16 lectures au plus, ou jusqu'à ce que
+  son état change) ; les autres traceurs gardent leur position et
+  l'intégration reste connectée. Si plusieurs traceurs échouent à la même
+  lecture, c'est toute la lecture qui échoue (pause pour un 5xx, nouvel
+  essai sinon). Une position refusée (HTTP 403, 404, réponse illisible :
+  un traceur sans abonnement ?) est laissée telle quelle jusqu'à ce que
+  l'état du traceur change.
 - **Accès refusé par autre chose que l'API** (une page 403 d'un pare-feu ou
   d'un proxy), **réponse inattendue**, **Invoxia injoignable** (réseau,
   délai de 30 s dépassé, certificat) : nouvel essai après le
-  rafraîchissement, puis le délai double jusqu'à 1 heure. L'intégration
-  n'abandonne jamais. Une position qui ne se lit pas (un traceur sans
-  abonnement ?) ne bloque pas les autres valeurs.
+  rafraîchissement, puis le délai double jusqu'à 1 heure, même après un
+  redémarrage de l'intégration (l'attente est gardée dans `/data`).
+  L'intégration n'abandonne jamais.
+- **Une date à plus d'un jour dans le futur** (horloge du traceur fausse)
+  est ignorée : seules les autres dates comptent pour « vu pour la
+  dernière fois » et « muet ».
 - **Tester la connexion** relit et dit combien de traceurs répondent ; il
   ne raccourcit jamais un arrêt ni une pause.
 
@@ -117,11 +132,14 @@ depuis (minutes), vu pour la dernière fois.
 
 Aucune position, aucun nom ni identifiant de traceur, ni l'adresse e-mail
 ni le mot de passe n'est jamais écrit dans un journal ni dans le volume
-`/data` de l'intégration (elle n'y garde qu'une empreinte salée des
-identifiants après un refus, et la fin d'une pause). Les positions ne vont
-qu'à Gladys et ne sont gardées qu'en mémoire. Les identifiants externes des
-appareils sont des empreintes de l'identifiant Invoxia du traceur, jamais
-l'identifiant lui-même ni le numéro de série.
+`/data` de l'intégration (elle n'y garde qu'une empreinte courte des
+identifiants, 4 caractères, qui sert seulement à voir qu'ils ont changé,
+avec la fin d'un arrêt, d'une pause ou d'une attente). L'intégration ne
+garde les positions qu'en mémoire ; Gladys garde la dernière position de
+chaque traceur dans sa base (et ses sauvegardes), et tout l'historique
+seulement si vous l'activez. L'identifiant externe d'un appareil est une
+empreinte non secrète de l'identifiant Invoxia du traceur (jamais
+l'identifiant lui-même ni le numéro de série).
 
 ## Limites
 

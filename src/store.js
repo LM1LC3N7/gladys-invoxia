@@ -2,12 +2,14 @@
 // A small JSON file in the writable /data volume, for what the integration
 // learns and must keep across restarts:
 //   - refusals: per account (a salted digest of the e-mail address), a JSON
-//     `{ k, s, u, p, f }`: the HMAC (keyed with `meta.salt`) of the
-//     credentials Invoxia refused, the number of refusals in a row, the end
-//     of the stop (1 h, 6 h, 24 h), an attempt in flight, the one forced
-//     attempt used.
-//   - meta: `salt`, a random key generated once for the digests above, and
-//     `pausedUntil|<account digest>`, the end of a pause after HTTP 429 or 5xx.
+//     `{ k, s, u, p, f }`: 4 hex of an HMAC (keyed with `meta.salt`) of the
+//     credentials Invoxia refused (only to see a change), the number of
+//     refusals in a row, the end of the stop (1 h, 6 h, 24 h), an attempt in
+//     flight, the one forced attempt used.
+//   - meta: `salt`, a random key generated once for the digests above,
+//     `pausedUntil|<account digest>`, the end of a pause after HTTP 429 or
+//     5xx, and `retryAt|<account digest>`, `<4 hex>|<end>|<next delay>`, the
+//     retry wait after a failed reading.
 // Never an e-mail address, a password, a position, a tracker name or id.
 // Writes are atomic (temporary file + rename) and queued. When the file
 // cannot be written (no /data during development), values stay in memory.

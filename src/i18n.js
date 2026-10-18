@@ -184,6 +184,14 @@ export const T = {
         },
         RETRY(delay),
       ),
+    retryPending: (delay) =>
+      join(
+        {
+          en: 'The last reading of Invoxia failed (before the restart of the integration).',
+          fr: 'La dernière lecture d’Invoxia a échoué (avant le redémarrage de l’intégration).',
+        },
+        RETRY(delay),
+      ),
     unreachable: (err, delay) =>
       join(
         { en: 'Invoxia does not answer:', fr: 'Invoxia ne répond pas :' },

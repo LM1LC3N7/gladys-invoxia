@@ -32,18 +32,23 @@ Gladys ⇄ SDK ⇄ src/app.js (InvoxiaApp)
   frequent reads): one request for the trackers and their status (battery,
   last event, motion, sometimes the last position), plus one
   `tracker_data` request per tracker whose status moved on (the last
-  location and its accuracy). 20 trackers at most (created ones first);
-  one unreadable tracker is skipped alone; a failure of a location read
-  never blocks the status of the trackers.
-- **Refusals** (HTTP 401, or the API's own 403 on the list): a wrong
-  password tried again and again may lock the account, so the integration
-  stops 1 h, then 6 h, then 24 h (persisted in `/data` as a salted HMAC of
-  the credentials, with the step and the end; an attempt in flight at a
-  stop counts as a refusal); saving the same credentials makes one attempt
-  per series of refusals. HTTP 429 and 5xx pause every request
-  (Retry-After, 1 min to 6 h, never under the poll interval, kept in
-  `/data`); other failures retry from the poll interval, doubling to 1 h.
-- **External ids**: `device:<digest of the Invoxia id>`. Every state within
+  location and its accuracy), the tracker tried longest ago first. 20
+  trackers at most (created ones first); one unreadable tracker is skipped
+  alone; a failure of a location read never blocks the status of the
+  trackers: a 5xx or a timeout makes only that tracker wait (its own
+  back-off of 2 to 16 rounds, or until its status changes), unless several
+  trackers fail in the same round.
+- **Refusals** (HTTP 401 or the API's own 403 on the list, or two 401 in a
+  row on the locations): a wrong password tried again and again may lock
+  the account, so the integration stops 1 h, then 6 h, then 24 h
+  (persisted in `/data` with 4 hex of a salted HMAC of the credentials,
+  only to see a change, with the step and the end; an attempt in flight at
+  a stop counts as a refusal); saving the same credentials makes one
+  attempt per series of refusals, used when its request leaves. HTTP 429
+  (any request) and 5xx (the list) pause every request (Retry-After, 1 min
+  to 6 h, never under the poll interval, kept in `/data`); other failures
+  retry from the poll interval, doubling to 1 h (the wait kept in `/data`).
+- **External ids**: `device:<non-secret digest of the Invoxia id>`. Every state within
   250 states/min: silent, then the position (latitude with longitude),
   battery, other numbers, last seen. Positions keep no history by default.
 - **Trigger** `device_silent`: per tracker and threshold (1 h to 48 h,

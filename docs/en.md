@@ -26,9 +26,9 @@ Unofficial integration, not affiliated with Invoxia.
 
 Invoxia offers no API to its consumer customers (it is kept for its
 professional offer). Like gps-tracker, this integration uses the API of the
-Invoxia app with your credentials. Its terms of use do not forbid it
-outright, but do not encourage it either: Invoxia could act on an account
-that abuses it. The integration therefore keeps the requests to the bare
+Invoxia app with your credentials. According to the author of gps-tracker,
+the terms of use of Invoxia do not forbid it outright, but do not encourage
+it either, and Invoxia could act on an account that abuses it. The integration therefore keeps the requests to the bare
 minimum: 5 minutes at least between two readings, and the location of a
 tracker is read again only when its status changed.
 
@@ -76,7 +76,8 @@ created trackers receive their values.
 Choose the tracker (or any) and the delay (**required**: 1 hour to 48
 hours). The scene starts when the tracker gave no news for this delay, at
 the next reading. Only the trackers created in Gladys fire. **Once per
-silence**: again only after news less than an hour old. Never for a delay
+silence**: newer news (even old) arms again only the delays longer than
+its age. Never for a delay
 already reached when the integration starts (no event at the first
 reading), nor for a tracker seen for the first time, nor at a reading where
 the clock of Gladys jumped. 30 events at most per reading. Variables: name
@@ -84,8 +85,9 @@ of the tracker, silent for (minutes), last seen.
 
 ## Connection problems
 
-- **Credentials refused** (HTTP 401, or a 403 of the Invoxia API on the list
-  of trackers): a wrong password tried again and again may lock the
+- **Credentials refused** (HTTP 401 or 403 of the Invoxia API on the list
+  of trackers, or two 401 in a row on the positions; a single 401 on a
+  position only makes that tracker wait): a wrong password tried again and again may lock the
   account. Gladys therefore stops for **1 hour**, then **6 hours**, then
   **24 hours** after each new refusal, never in a loop. The stop is kept in
   `/data`: a restart, a reconnection of Gladys and the test button wait
@@ -93,17 +95,27 @@ of the tracker, silent for (minutes), last seen.
   refusal. Saving the configuration with the same credentials makes **one**
   attempt at once per series of refusals; other credentials are tried at
   once. A reading that works forgets the refusals.
-- **Invoxia overloaded** (HTTP 429) or **server error** (HTTP 5xx): every
-  request is paused, for the time Invoxia asks (Retry-After) between 1
-  minute and 6 hours, never less than the refresh. The pause is kept in
-  `/data`. When it happens on the reading of a position, the status of the
-  trackers (battery, last seen) is published first.
+- **Invoxia overloaded** (HTTP 429, on any request) or **server error**
+  (HTTP 5xx on the list of trackers): every request is paused, for the time
+  Invoxia asks (Retry-After) between 1 minute and 6 hours, never less than
+  the refresh. The pause is kept in `/data`, even when the answer arrives
+  during a reconnection of Gladys. When it happens on the reading of a
+  position, the status of the trackers (battery, last seen) is published
+  first.
+- **The position of one tracker fails** (HTTP 5xx, timeout): only that
+  tracker waits (2, 4, 8, then 16 readings at most, or until its status
+  changes); the other trackers keep their position and the integration
+  stays connected. When several trackers fail in the same reading, the
+  whole reading fails (a pause for a 5xx, a retry otherwise). A position
+  refused (HTTP 403, 404, unreadable answer: a tracker without a
+  subscription?) is left as it was until the status of the tracker changes.
 - **Access refused by something else than the API** (a 403 page of a
   firewall or a proxy), **unexpected answer**, **Invoxia unreachable**
   (network, 30 s timeout, certificate): retried after the refresh, then the
-  delay doubles up to 1 hour. The integration never gives up. A position
-  that cannot be read (a tracker without a subscription?) never blocks the
-  other values.
+  delay doubles up to 1 hour, even after a restart of the integration (the
+  wait is kept in `/data`). The integration never gives up.
+- **A date more than a day in the future** (a tracker with a wrong clock)
+  is ignored: only the other dates count for "last seen" and "silent".
 - **Test the connection** reads again and says how many trackers answer; it
   never shortens a stop nor a pause.
 
@@ -111,10 +123,13 @@ of the tracker, silent for (minutes), last seen.
 
 No position, no tracker name or id, neither the e-mail address nor the
 password is ever written to a log or to the `/data` volume of the
-integration (it keeps there only a salted digest of the credentials after a
-refusal, and the end of a pause). The positions go to Gladys only and are
-kept in memory only. The external ids of the devices are digests of the
-Invoxia id of the tracker, never the id itself nor the serial number.
+integration (it keeps there only a short digest of the credentials, 4
+characters, used only to see that they changed, with the end of a stop, of
+a pause or of a wait). The integration keeps the positions in memory only;
+Gladys keeps the last position of each tracker in its database (and its
+backups), and the whole history only if you turn it on. The external id of
+a device is a non-secret digest of the Invoxia id of the tracker (never the
+id itself nor the serial number).
 
 ## Limits
 
