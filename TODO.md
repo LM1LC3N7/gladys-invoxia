@@ -151,8 +151,14 @@ the credentials, s: step, u: end, p: pending, f: forced }` under a salted
   pause of every path. A 5xx or a transport failure (timeout, network)
   makes only that tracker wait: cache `{ mark, location, tried,
 failedMark, failCount, retryRound }`, no new read before its status moves
-  on or before 2, 4, 8, then 16 rounds; two trackers failing in the same
-  round fail the round (pause for a 5xx, retry for a timeout). A 403, 404
+  on or before 2, 4, 8, then 16 rounds (`failCount` counts the failures in
+  a row, reset by a location read); two trackers failing for the first
+  time in the same round fail the round (pause for a 5xx, retry for a
+  timeout): a tracker already in its back-off never does (approval note
+  1). A page of locations keeps its newest point dated at most now + 24 h
+  (approval note 2). `persistFailure` writes the retry wait to `/data` for
+  a retry or a pause, so a failure answered during a reconnection keeps it
+  (approval note 3). A 403, 404
   or unreadable answer caches `{ mark, previous location or null }` (point
   6): not read again before the status moves on. A 401 there only makes
   that tracker wait, unless the previous answer of this endpoint was a 401

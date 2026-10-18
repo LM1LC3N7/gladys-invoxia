@@ -130,14 +130,16 @@ export function parseTrackers(value) {
  * null when it holds none: { lat, lon, accuracy, timestampMs }. Undefined
  * when the answer is not a list.
  */
-export function parseLocations(value) {
+export function parseLocations(value, maxMs = Infinity) {
   if (!Array.isArray(value)) return undefined;
   let best = null;
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
     const timestampMs = parseDate(entry.datetime);
     const { lat, lon } = position(entry.lat, entry.lng);
-    if (timestampMs === null || lat === null) continue;
+    // A point dated after `maxMs` (a tracker with a wrong clock) never hides
+    // the plausible ones.
+    if (timestampMs === null || timestampMs > maxMs || lat === null) continue;
     if (best && best.timestampMs >= timestampMs) continue;
     const precision = within(entry.precision, 0, 1_000_000);
     best = { lat, lon, accuracy: round(precision, 1), timestampMs };

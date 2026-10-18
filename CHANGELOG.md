@@ -44,5 +44,9 @@ the notes of the version's GitHub Release.
 - Saving the configuration uses its one attempt only when the request
   leaves, never during a pause; `/data` keeps a 4-character digest of the
   credentials instead of a full one.
+- A tracker already in its own back-off never fails the whole reading; a
+  location dated in the far future no longer hides the real position of
+  the page; a failed reading answered during a reconnection keeps its
+  retry wait in `/data`.
 - Docs: what Gladys keeps of the positions, the external id a non-secret
   digest, the terms of use as stated by the author of gps-tracker.

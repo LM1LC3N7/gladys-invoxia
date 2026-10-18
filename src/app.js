@@ -595,6 +595,16 @@ export class InvoxiaApp {
       });
       return { kind: 'stepWait', step: ctx.step, delay };
     }
+    // The retry wait goes to /data too: a failure answered during a
+    // reconnection (or before a restart) is never read again sooner.
+    const retryDelay = ctx.retryDelay ?? this.retryDelay;
+    const next =
+      err?.status === 429 ? retryDelay : Math.min(retryDelay * 2, INTERVALS.RETRY_MAX_MS);
+    await this.store.set(
+      'meta',
+      `retryAt|${ctx.baseKey}`,
+      `${key}|${now + (pause ?? retryDelay)}|${next}`,
+    );
     return pause !== null ? { kind: 'pause', delay: pause } : { kind: 'retry' };
   }
 
@@ -799,15 +809,18 @@ export class InvoxiaApp {
       const waiting = cached?.failedMark === mark && round < (cached?.retryRound ?? 0);
       if (!changed || waiting) continue;
       try {
-        const location = await client.lastLocation(tracker.id);
+        // The newest plausible point of the page (see `plausible` below).
+        const location = await client.lastLocation(tracker.id, this.now() + DAY);
         this.locations.set(tracker.key, { mark, location, tried: round });
         this.locations401 = false;
       } catch (err) {
         if (!(err instanceof InvoxiaError)) throw err;
         this.logger.debug(`A location was not read: ${this.describe(err)}`);
         const kept = cached?.location ?? null;
+        // The failures in a row of this tracker (a location read resets
+        // them): returns their count.
         const backOff = () => {
-          const count = (cached?.failedMark === mark ? (cached.failCount ?? 0) : 0) + 1;
+          const count = (cached?.failCount ?? 0) + 1;
           this.locations.set(tracker.key, {
             mark: cached?.mark ?? null,
             location: kept,
@@ -816,6 +829,7 @@ export class InvoxiaApp {
             failCount: count,
             retryRound: round + Math.min(2 ** count, LOCATION_BACKOFF_ROUNDS),
           });
+          return count;
         };
         if (err.status === 429) {
           secondary = err;
@@ -824,8 +838,9 @@ export class InvoxiaApp {
           else backOff();
           this.locations401 = true;
         } else if (err.status >= 500 || TRANSPORT.has(err.code)) {
-          backOff();
-          failures += 1;
+          // Only a tracker failing for the first time counts: one already in
+          // its back-off never fails the whole round.
+          if (backOff() === 1) failures += 1;
           if (failures >= 2) secondary = err;
         } else {
           this.locations.set(tracker.key, { mark, location: kept, tried: round });

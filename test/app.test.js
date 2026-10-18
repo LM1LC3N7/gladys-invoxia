@@ -405,6 +405,75 @@ test('two trackers failing in the same round: the states go, then every path pau
   assert.deepEqual(timers.delays(), [POLL]);
 });
 
+test('trackers already in their back-off never fail the round, even when their status moves', async () => {
+  const invoxia = createFakeInvoxia();
+  const { gladys, timers, dataDir } = await setup({ invoxia });
+  let minute = 0;
+  const move = () => {
+    minute += 1;
+    for (const id of [REX, VELO]) {
+      statusOf(invoxia, id).last_event =
+        `2026-10-18T07:${String(10 + minute).padStart(2, '0')}:00Z`;
+    }
+  };
+  invoxia.broken[`/devices/${REX}/`] = 500;
+  move();
+  await poll(timers);
+  invoxia.broken[`/devices/${VELO}/`] = 500;
+  for (let i = 0; i < 4; i += 1) {
+    move();
+    await poll(timers);
+    assert.equal(gladys.fake.connectionStatus.connected, true, `round ${i}`);
+  }
+  assert.ok(!storeText(dataDir).includes('pausedUntil'));
+  assert.ok(invoxia.locationRequests().length >= 8, 'read again at each move');
+});
+
+test('a location page with a point dated 2099: the real position is published', async () => {
+  const invoxia = createFakeInvoxia();
+  invoxia.locations[REX] = [
+    location({ datetime: '2099-01-01T00:00:00Z', lat: '10', lng: '10' }),
+    location({ datetime: '2026-10-18T05:29:00Z', lat: '45.764', lng: '4.8357' }),
+  ];
+  const { gladys } = await setup({ invoxia });
+  assert.equal(last(gladys, REX, 'latitude'), 45.764);
+  assert.equal(last(gladys, REX, 'last_seen'), '2026-10-18 05:30 UTC');
+});
+
+test('an ordinary failure answered during a reconnection is kept: no faster reading', async () => {
+  const invoxia = createFakeInvoxia();
+  const { gladys, timers, app, dataDir } = await setup({ invoxia });
+  invoxia.failures.push({ status: 404, body: '<html>Not found</html>' });
+  let release;
+  let held = false;
+  const gate = new Promise((resolve) => (release = resolve));
+  const original = invoxia.request;
+  invoxia.request = async (url, options) => {
+    if (!url.includes('tracker_data')) {
+      held = true;
+      await gate;
+    }
+    return original(url, options);
+  };
+  app.client.request = invoxia.request;
+  const lists = invoxia.listRequests().length;
+  const polling = poll(timers);
+  for (let i = 0; i < 100 && !held; i += 1) await tick();
+  assert.ok(held, 'the list request left');
+  gladys.emit('disconnected');
+  await tick();
+  gladys.emit('connected');
+  await tick();
+  release();
+  await polling;
+  for (let i = 0; i < 5; i += 1) await tick();
+  await app.queue;
+  assert.ok(storeText(dataDir).includes('retryAt'));
+  assert.equal(invoxia.listRequests().length, lists + 1, 'no new reading of the list');
+  assert.deepEqual(timers.delays(), [POLL]);
+  assert.match(gladys.fake.connectionStatus.message.en, /last reading of Invoxia failed/);
+});
+
 test('a timeout on the locations of one tracker: that one waits, the other is read', async () => {
   const invoxia = createFakeInvoxia();
   const original = invoxia.request;

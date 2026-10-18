@@ -87,12 +87,15 @@ export class InvoxiaClient {
     return trackers;
   }
 
-  /** The newest location of one tracker, or null. Rejects an InvoxiaError. */
-  async lastLocation(id) {
+  /**
+   * The newest location of one tracker dated at most `maxMs` (a point dated
+   * later is not plausible), or null. Rejects an InvoxiaError.
+   */
+  async lastLocation(id, maxMs = Infinity) {
     if (!/^\d+$/.test(id)) throw new InvoxiaError(CODES.BAD_ANSWER, 'Not a tracker id');
     const value = await this.get(`/devices/${id}/tracker_data/`, { account: false });
     if (value === null) return null;
-    const location = parseLocations(value);
+    const location = parseLocations(value, maxMs);
     if (location === undefined) throw new InvoxiaError(CODES.BAD_ANSWER, 'Not a list of locations');
     return location;
   }

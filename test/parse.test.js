@@ -109,6 +109,8 @@ test('locations: the newest of the page whatever its order, strings read as numb
     accuracy: 75,
     timestampMs: Date.parse('2019-11-07T14:12:13.798Z'),
   });
+  const far = { datetime: '2099-01-01T00:00:00Z', lat: '1', lng: '1' };
+  assert.equal(parseLocations([far, ...page], Date.parse('2020-01-01T00:00:00Z')).lat, 25.562265);
   assert.equal(parseLocations([]), null);
   assert.equal(parseLocations([{ datetime: 'x', lat: 1, lng: 1 }]), null);
   assert.equal(parseLocations({}), undefined);
