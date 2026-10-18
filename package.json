@@ -1,6 +1,6 @@
 {
   "name": "gladys-invoxia",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for Invoxia GPS trackers (bike, car, pets): position, accuracy, battery, motion, last seen and silence of each tracker, read only, through the cloud of Invoxia. Unofficial, not affiliated with Invoxia.",
   "type": "module",
