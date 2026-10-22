@@ -133,7 +133,7 @@ test('start: status, Discovery, every value, badges; read every 5 min', async ()
     invoxia.requests[0].headers.authorization,
     `Basic ${Buffer.from(`${USERNAME}:${PASSWORD}`).toString('base64')}`,
   );
-  assert.match(invoxia.requests[0].headers['user-agent'], /^gladys-invoxia\/0\.1\.0$/);
+  assert.match(invoxia.requests[0].headers['user-agent'], /^gladys-invoxia\/\d+\.\d+\.\d+$/);
   assert.equal(invoxia.locationRequests().length, 2);
   assert.equal(gladys.fake.sceneEvents.length, 0, 'nothing at the first reading');
   await poll(timers);
