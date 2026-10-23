@@ -6,8 +6,8 @@
     "en": "Position, battery and silence of your Invoxia GPS trackers (bike, car, pets), read only.",
     "fr": "Position, batterie et silence de vos traceurs GPS Invoxia (vélo, voiture, animaux), en lecture."
   },
-  "version": "0.1.1",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-invoxia:0.1.1",
+  "version": "0.1.2",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-invoxia:0.1.2",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-invoxia/main/cover.png",
   "categories": ["services", "security"],
